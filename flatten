@@ -1,0 +1,82 @@
+# Nested Nested code code
+import xmlschema
+import pandas as pd
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+
+# Load the XML schema
+schema = xmlschema.XMLSchema('/content/ZFIDCC2_Englisch_20241125.XSD')
+
+# Parse the XML data file
+xml_tree = ET.parse('/content/IDOC_99498578_20241125.xml')
+xml_root = xml_tree.getroot()
+
+# Function to flatten nested XML data with multiple occurrences
+def flatten_xml(element, parent_name='', sep='_'):
+    flat_data = defaultdict(list)
+
+    def _flatten(element, parent_name='', sep='_'):
+        local_data = defaultdict(list)
+
+        for child in element:
+            child_name = f"{parent_name}{sep}{child.tag}" if parent_name else child.tag
+
+            if len(child):  # if the child has subelements
+                nested_data = _flatten(child, child_name, sep)
+                for key, value in nested_data.items():
+                    local_data[key].extend(value)
+            else:
+                local_data[child_name].append(child.text)
+
+        if local_data:
+            for key, value in local_data.items():
+                flat_data[key].extend(value)
+
+        return local_data
+
+    _flatten(element, parent_name, sep)
+
+    # Ensure all lists in flat_data are of the same length
+    max_length = max(len(v) for v in flat_data.values())
+    for key in flat_data:
+        while len(flat_data[key]) < max_length:
+            flat_data[key].append(None)
+
+    return flat_data
+
+# Flatten the XML data
+flat_data = flatten_xml(xml_root)
+
+# Extract all fields defined in the XSD schema
+def extract_schema_fields(schema):
+    fields = []
+
+    def _extract_fields(element, parent_name=''):
+        for field in element:
+            field_name = f"{parent_name}_{field.name}" if parent_name else field.name
+            fields.append(field_name)
+            if hasattr(field, 'type') and hasattr(field.type, 'content'):
+                _extract_fields(field.type.content, field_name)
+
+    _extract_fields(schema.elements[list(schema.elements.keys())[0]].type.content)
+    return fields
+
+# Get the schema fields
+schema_fields = extract_schema_fields(schema)
+
+# Create a dictionary with all schema fields, filling missing fields with None
+data_dict = defaultdict(list)
+
+for field in schema_fields:
+    if field in flat_data:
+        data_dict[field] = flat_data[field]
+    else:
+        data_dict[field] = [None] * len(next(iter(flat_data.values())))
+
+# Convert the dictionary to a DataFrame
+df = pd.DataFrame(data_dict)
+
+# Save the DataFrame to a CSV file
+df.to_csv('newfile2.csv', index=False)
+
+print("CSV file created successfully!")
